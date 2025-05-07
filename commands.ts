@@ -80,35 +80,74 @@ export function handleTagCommand(message: Message): void {
 export async function handlePredictCommand(message: Message): Promise<void> {
   const parts = message.content.trim().split(/\s+/);
 
+  // Normalize tags: allow both TAG#000 and TAG-000
+  const normalizeTag = (tag: string) => tag.replace('-', '#');
+
   // Case 1: !predict opponentTag
   if (parts.length === 2) {
-    const opponentTag = parts[1];
+    const opponentTag = normalizeTag(parts[1]);
     if (!opponentTag.includes('#')) {
       await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
       return;
     }
 
     const yourTags = getTag(message.author.id);
-if (!yourTags || yourTags.length === 0) {
-  await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
-  return;
-}
+    if (!yourTags || yourTags.length === 0) {
+      await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
+      return;
+    }
 
-if (yourTags.length > 1) {
-  await message.reply(`⚠️ You have multiple tags saved. Use \`!predict TAG#000 OPPONENT#000\` to specify.`);
-  return;
-}
+    if (yourTags.length > 1) {
+      const promptLines = yourTags.map((tag, i) => `**${i + 1}.** \`${tag}\``).join('\n');
+      const promptMessage = await message.reply(
+        `⚠️ You have multiple tags saved. Please reply with the number of the tag you'd like to use:\n${promptLines}\n\n_Pro tip: next time you can just use \`!predict YOURTAG#000 OPPONENT#000\` to skip this._`
+      );
+    
+      const filter = (m: Message) =>
+        m.author.id === message.author.id &&
+        !isNaN(parseInt(m.content.trim())) &&
+        parseInt(m.content.trim()) >= 1 &&
+        parseInt(m.content.trim()) <= yourTags.length;
+    
+      try {
+        if (!message.channel || !('awaitMessages' in message.channel)) {
+          await promptMessage.delete().catch(() => {});
+          await message.reply('❌ Cannot prompt for input in this type of channel.');
+          return;
+        }
+    
+        const collected = await message.channel.awaitMessages({
+          filter,
+          max: 1,
+          time: 15000,
+          errors: ['time'],
+        });
+    
+        await promptMessage.delete().catch(() => {});
+    
+        const selectedIndex = parseInt(collected.first()!.content.trim(), 10) - 1;
+        const selectedTag = yourTags[selectedIndex];
+    
+        const result = await handlePredictionResponse(selectedTag, opponentTag);
+        await message.reply(result);
+      } catch {
+        await promptMessage.delete().catch(() => {});
+        await message.reply('❌ You didn’t respond in time. Try the command again.');
+      }
+    
+      return;
+    }
 
-const result = await handlePredictionResponse(yourTags[0], opponentTag);
-
-
+    const result = await handlePredictionResponse(yourTags[0], opponentTag);
     await message.reply(result);
     return;
   }
 
   // Case 2: !predict player1#000 player2#000
   if (parts.length === 3) {
-    const [_, tag1, tag2] = parts;
+    const tag1 = normalizeTag(parts[1]);
+    const tag2 = normalizeTag(parts[2]);
+
     if (!tag1.includes('#') || !tag2.includes('#')) {
       await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
       return;
@@ -121,6 +160,7 @@ const result = await handlePredictionResponse(yourTags[0], opponentTag);
 
   await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
 }
+
 
 async function handlePredictionResponse(playerCode: string, opponentCode: string): Promise<string> {
   try {
