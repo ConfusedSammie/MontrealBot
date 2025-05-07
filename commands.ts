@@ -78,35 +78,76 @@ export function handleTagCommand(message: Message): void {
 }
 
 export async function handlePredictCommand(message: Message): Promise<void> {
-  const parts = message.content.split(' ');
-  const opponentTag = parts[1];
+  const parts = message.content.trim().split(/\s+/);
 
-  if (!opponentTag || !opponentTag.includes('#')) {
-    await message.reply('Usage: `!predict OPPONENT#000`\nOr: Register with `!tag YOURTAG#000` first.');
+  // Case 1: !predict opponentTag
+  if (parts.length === 2) {
+    const opponentTag = parts[1];
+    if (!opponentTag.includes('#')) {
+      await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
+      return;
+    }
+
+    const yourTag = getTag(message.author.id);
+    if (!yourTag) {
+      await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
+      return;
+    }
+
+    const result = await handlePredictionResponse(yourTag, opponentTag);
+    await message.reply(result);
     return;
   }
 
-  const yourTag = getTag(message.author.id);
-  if (!yourTag) {
-    await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
+  // Case 2: !predict player1#000 player2#000
+  if (parts.length === 3) {
+    const [_, tag1, tag2] = parts;
+    if (!tag1.includes('#') || !tag2.includes('#')) {
+      await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
+      return;
+    }
+
+    const result = await handlePredictionResponse(tag1, tag2);
+    await message.reply(result);
     return;
   }
 
+  await message.reply('Usage: `!predict OPPONENT#000` or `!predict PLAYER1#000 PLAYER2#000`');
+}
+
+async function handlePredictionResponse(playerCode: string, opponentCode: string): Promise<string> {
   try {
-    const result = await predictChange(opponentTag, yourTag);
+    const result = await predictChange(opponentCode, playerCode);
 
-    const promoNote = result.winRank !== result.currentRank ? ` | 🟢 **Promotes to** ${result.winRank}` : ``;
-    const demoNote = result.lossRank !== result.currentRank ? ` | 🔴 **Demotes to** ${result.lossRank}` : ``;
+    const currentEmoji = getEmojiIdForName(result.currentRankEmojiName) || '';
+    const winEmoji = getEmojiIdForName(result.winRankEmojiName) || '';
+    const lossEmoji = getEmojiIdForName(result.lossRankEmojiName) || '';
+    const opponentEmoji = getEmojiIdForName(result.opponentRankEmojiName) || '';
 
-    await message.reply(
-      `📊 ${result.opponent} (${result.opponentOrdinal.toFixed(1)})\n` +
+    const promoNote =
+      result.winRank !== result.currentRank
+        ? ` | 🟢 **Promotes to** ${winEmoji} ${result.winRank}`
+        : '';
+    const demoNote =
+      result.lossRank !== result.currentRank
+        ? ` | 🔴 **Demotes to** ${lossEmoji} ${result.lossRank}`
+        : '';
+
+    return (
+      `**${result.player}** (${result.playerOrdinal.toFixed(1)}) ${currentEmoji} ` +
+      `vs **${result.opponent}** (${result.opponentOrdinal.toFixed(1)}) ${opponentEmoji}\n` +
       `Win: +${result.deltaWin.toFixed(1)} ${promoNote}\n` +
       `Loss: ${result.deltaLoss.toFixed(1)} ${demoNote}`
     );
   } catch (err: any) {
-    await message.reply(`Prediction failed: ${err.message}`);
+    return `Prediction failed: ${err.message}`;
   }
 }
+
+
+
+
+
 
 function rankToEmoji(rank: string) {
   // E.g. Bronze II -> :BronzeII:
@@ -152,10 +193,6 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
     }
 
     results.sort((a, b) => b.ordinal - a.ordinal);
-
-   /* const lines = results.map((r, i) =>
-      `**#${i + 1}** ${r.emoji} ${r.name} (${escapeMarkdown(r.tag)}) — ${r.ordinal.toFixed(1)} *${r.rank}*`
-    );*/
 
     const lines = results.map((r, i) =>
       `**#${i + 1}** ${r.emoji} ${r.name} — ${escapeMarkdown(r.tag)} —  ${r.ordinal.toFixed(1)} ${r.games} | ${r.characters}`

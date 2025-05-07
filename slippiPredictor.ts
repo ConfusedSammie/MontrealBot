@@ -107,7 +107,7 @@ export async function fetchSlippiProfile(code: string) {
     regionalPlacement: profile.dailyRegionalPlacement,
     globalPlacement: profile.dailyGlobalPlacement,
     wins: profile.wins,
-    losses:profile.losses,
+    losses: profile.losses,
     characters: profile.characters.map(c => c.character)
   };
 }
@@ -138,13 +138,25 @@ export async function predictChange(opponentCode: string, playerCode: string = "
   const deltaWin = winOrdinal - currentOrdinal;
   const deltaLoss = lossOrdinal - currentOrdinal;
 
+  const opponentRank = getRank(opponent.ordinal, opponent.regionalPlacement, opponent.globalPlacement);
+  const opponentRankEmojiName = opponentRank.replace(' ', '');
+
   return {
     opponent: opponent.name,
     opponentOrdinal: opponent.ordinal,
+    opponentRank,
+    opponentRankEmojiName,
+    player: player.name,
+    playerOrdinal: player.ordinal,
     deltaWin,
     deltaLoss,
     currentRank,
     winRank,
     lossRank,
+    currentRankEmojiName: currentRank.replace(' ', ''),
+    winRankEmojiName: winRank.replace(' ', ''),
+    lossRankEmojiName: lossRank.replace(' ', '')
   };
+
+
 }
