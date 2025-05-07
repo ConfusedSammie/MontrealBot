@@ -1,0 +1,18 @@
+# sensitive files
+.env
+.env.*       # in case you have .env.dev or .env.prod
+
+# system stuff
+node_modules/
+dist/
+build/
+logs/
+.DS_Store
+
+# editor files
+.vscode/
+.idea/
+
+# OS or temporary
+*.log
+*.tmp
