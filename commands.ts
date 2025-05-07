@@ -6,7 +6,7 @@ import { predictChange, fetchSlippiProfile, getRank } from './slippiPredictor.js
 import { getAllTags, getTag, setTag } from './tagStore.js';
 import path from 'path';
 import fs from 'fs/promises';
-import { getEmojiIdForName, getCharacterEmoji } from './emojis.ts';
+import { getEmojiIdForName, getCharacterEmoji } from './emojis.js';
 
 
 export async function handleResultsCommand(message: Message): Promise<void> {
@@ -88,13 +88,20 @@ export async function handlePredictCommand(message: Message): Promise<void> {
       return;
     }
 
-    const yourTag = getTag(message.author.id);
-    if (!yourTag) {
-      await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
-      return;
-    }
+    const yourTags = getTag(message.author.id);
+if (!yourTags || yourTags.length === 0) {
+  await message.reply('⚠️ You must register your Slippi tag first using `!tag YOURTAG#000`');
+  return;
+}
 
-    const result = await handlePredictionResponse(yourTag, opponentTag);
+if (yourTags.length > 1) {
+  await message.reply(`⚠️ You have multiple tags saved. Use \`!predict TAG#000 OPPONENT#000\` to specify.`);
+  return;
+}
+
+const result = await handlePredictionResponse(yourTags[0], opponentTag);
+
+
     await message.reply(result);
     return;
   }
@@ -169,33 +176,36 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
       characters: string;
     }[] = [];
 
-    for (const [discordId, slippiTag] of Object.entries(tags)) {
-      try {
-        const profile = await fetchSlippiProfile(slippiTag as string);
-        const rank = getRank(profile.ordinal).toUpperCase().replace(' ', '');
-        const emoji = rankToEmoji(rank);
-        const games = '(W:'+profile.wins + ' / L:' + profile.losses+')';
-        const characters = profile.characters.map(getCharacterEmoji).join(' ');
+    for (const [discordId, tagList] of Object.entries(tags)) {
+      const tagArray = Array.isArray(tagList) ? tagList : [tagList]; // handles old single-tag format
 
+      for (const slippiTag of tagArray) {
+        try {
+          const profile = await fetchSlippiProfile(slippiTag);
+          const rank = getRank(profile.ordinal).toUpperCase().replace(' ', '');
+          const emoji = rankToEmoji(rank);
+          const games = `(W:${profile.wins} / L:${profile.losses})`;
+          const characters = profile.characters.map(getCharacterEmoji).join(' ');
 
-        results.push({
-          name: `<@${discordId}>`,
-          tag: slippiTag,
-          ordinal: profile.ordinal,
-          rank,
-          emoji,
-          games,
-          characters
-        });
-      } catch {
-        // skip invalid tags or fetch failures
+          results.push({
+            name: `<@${discordId}>`,
+            tag: slippiTag,
+            ordinal: profile.ordinal,
+            rank,
+            emoji,
+            games,
+            characters
+          });
+        } catch {
+          // skip bad tags or failed lookups
+        }
       }
     }
 
     results.sort((a, b) => b.ordinal - a.ordinal);
 
     const lines = results.map((r, i) =>
-      `**#${i + 1}** ${r.emoji} ${r.name} — ${escapeMarkdown(r.tag)} —  ${r.ordinal.toFixed(1)} ${r.games} | ${r.characters}`
+      `**#${i + 1}** ${r.emoji} ${r.name} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games} | ${r.characters}`
     );
 
     const embed = new EmbedBuilder()
