@@ -8,6 +8,20 @@ import path from 'path';
 import fs from 'fs/promises';
 import { getEmojiIdForName, getCharacterEmoji } from './emojis.js';
 
+export async function handleLinkCommand(message: Message): Promise<void> {
+  const parts = message.content.trim().split(/\s+/);
+
+  if (parts.length !== 2 || !parts[1].includes('#')) {
+    await message.reply('Usage: `!link TAG#000`');
+    return;
+  }
+
+  const slippiTag = parts[1].replace('#', '-').toLowerCase(); // Slippi URLs are lowercase
+  const url = `https://slippi.gg/user/${slippiTag}`;
+
+  await message.reply(url);
+}
+
 
 export async function handleResultsCommand(message: Message): Promise<void> {
   const url = message.content.split(' ')[1];

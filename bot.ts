@@ -7,7 +7,8 @@ import {
   handleStopResultsCommand,
   handlePredictCommand,
   handleTagCommand,
-  handleLeaderboardCommand
+  handleLeaderboardCommand,
+  handleLinkCommand
 } from './commands.js';
 
 const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID!;
@@ -47,6 +48,8 @@ client.on('messageCreate', async (message: Message) => {
     handleTagCommand(message);
   } else if (message.content.startsWith('!leaderboard')) {
     await handleLeaderboardCommand(message);
+  } else if (message.content.startsWith('!link')) {
+    await handleLinkCommand(message);
   }
 });
 
