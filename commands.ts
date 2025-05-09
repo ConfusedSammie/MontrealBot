@@ -5,7 +5,7 @@ import { activeEventIntervals } from './state.js';
 import { predictChange, fetchSlippiProfile, getRank } from './slippiPredictor.js';
 import { getAllTags, getTag, setTag } from './tagStore.js';
 import path from 'path';
-import fs from 'fs/promises';
+import fs from 'fs';
 import { getEmojiIdForName, getCharacterEmoji } from './emojis.js';
 
 export async function handleLinkCommand(message: Message): Promise<void> {
@@ -17,7 +17,7 @@ export async function handleLinkCommand(message: Message): Promise<void> {
   }
 
   const slippiTag = parts[1].replace('#', '-').toLowerCase(); // Slippi URLs are lowercase
-  const url = `https://slippi.gg/user/${slippiTag}`;
+  const url = `<https://slippi.gg/user/${slippiTag}>`;
 
   await message.reply(url);
 }
@@ -116,39 +116,39 @@ export async function handlePredictCommand(message: Message): Promise<void> {
       const promptMessage = await message.reply(
         `⚠️ You have multiple tags saved. Please reply with the number of the tag you'd like to use:\n${promptLines}\n\n_Pro tip: next time you can just use \`!predict YOURTAG#000 OPPONENT#000\` to skip this._`
       );
-    
+
       const filter = (m: Message) =>
         m.author.id === message.author.id &&
         !isNaN(parseInt(m.content.trim())) &&
         parseInt(m.content.trim()) >= 1 &&
         parseInt(m.content.trim()) <= yourTags.length;
-    
+
       try {
         if (!message.channel || !('awaitMessages' in message.channel)) {
-          await promptMessage.delete().catch(() => {});
+          await promptMessage.delete().catch(() => { });
           await message.reply('❌ Cannot prompt for input in this type of channel.');
           return;
         }
-    
+
         const collected = await message.channel.awaitMessages({
           filter,
           max: 1,
           time: 15000,
           errors: ['time'],
         });
-    
-        await promptMessage.delete().catch(() => {});
-    
+
+        await promptMessage.delete().catch(() => { });
+
         const selectedIndex = parseInt(collected.first()!.content.trim(), 10) - 1;
         const selectedTag = yourTags[selectedIndex];
-    
+
         const result = await handlePredictionResponse(selectedTag, opponentTag);
         await message.reply(result);
       } catch {
-        await promptMessage.delete().catch(() => {});
+        await promptMessage.delete().catch(() => { });
         await message.reply('❌ You didn’t respond in time. Try the command again.');
       }
-    
+
       return;
     }
 
@@ -216,9 +216,25 @@ function rankToEmoji(rank: string) {
   return getEmojiIdForName(nospaces);
 }
 
+type LeaderboardSnapshot = Record<string, Record<string, number>>;
+const HISTORY_FILE = './last_leaderboard.json';
+function loadLastLeaderboard(): LeaderboardSnapshot {
+  try {
+    const raw = fs.readFileSync(HISTORY_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+function saveLeaderboard(snapshot: LeaderboardSnapshot): void {
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(snapshot, null, 2), 'utf8');
+}
+
 export async function handleLeaderboardCommand(message: Message): Promise<void> {
   try {
     const tags = getAllTags();
+    const lastLeaderboard = loadLastLeaderboard();
+    const newSnapshot: LeaderboardSnapshot = {};
 
     const results: {
       name: string;
@@ -228,10 +244,11 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
       emoji: string;
       games: string;
       characters: string;
+      delta: string;
     }[] = [];
 
     for (const [discordId, tagList] of Object.entries(tags)) {
-      const tagArray = Array.isArray(tagList) ? tagList : [tagList]; // handles old single-tag format
+      const tagArray = Array.isArray(tagList) ? tagList : [tagList];
 
       for (const slippiTag of tagArray) {
         try {
@@ -241,6 +258,21 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
           const games = `(W:${profile.wins} / L:${profile.losses})`;
           const characters = profile.characters.map(getCharacterEmoji).join(' ');
 
+          const previous = lastLeaderboard[discordId]?.[slippiTag];
+          let delta = '';
+
+          if (typeof previous === 'number') {
+            const diff = profile.ordinal - previous;
+            const symbol = diff > 0 ? '🔺' : diff < 0 ? '🔻' : '';
+            if (symbol)
+              delta = `${symbol} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`;
+          } else {
+            delta = '🆕';
+          }
+
+          if (!newSnapshot[discordId]) newSnapshot[discordId] = {};
+          newSnapshot[discordId][slippiTag] = profile.ordinal;
+
           results.push({
             name: `<@${discordId}>`,
             tag: slippiTag,
@@ -248,18 +280,23 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
             rank,
             emoji,
             games,
-            characters
+            characters,
+            delta
           });
         } catch {
-          // skip bad tags or failed lookups
+          // skip invalid or failed lookups
         }
+
       }
     }
+
+    // Save the current snapshot
+    saveLeaderboard(newSnapshot);
 
     results.sort((a, b) => b.ordinal - a.ordinal);
 
     const lines = results.map((r, i) =>
-      `**#${i + 1}** ${r.emoji} ${r.name} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games} | ${r.characters}`
+      `**#${i + 1}** ${r.emoji} ${r.name} ${r.delta} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games}  ${r.characters}`
     );
 
     const embed = new EmbedBuilder()
