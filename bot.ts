@@ -8,7 +8,8 @@ import {
   handlePredictCommand,
   handleTagCommand,
   handleLeaderboardCommand,
-  handleLinkCommand
+  handleLinkCommand,
+  handleUpsetsCommand
 } from './commands.js';
 
 const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID!;
@@ -39,7 +40,7 @@ client.on('messageCreate', async (message: Message) => {
   }
 
   if (message.content.startsWith('!results')) {
-   // await handleResultsCommand(message);
+    await handleResultsCommand(message);
   } else if (message.content.startsWith('!stopresults')) {
     //handleStopResultsCommand(message);
   } else if (message.content.startsWith('!predict')) {
@@ -50,6 +51,8 @@ client.on('messageCreate', async (message: Message) => {
     await handleLeaderboardCommand(message);
   } else if (message.content.startsWith('!link')) {
     await handleLinkCommand(message);
+  } else if (message.content.startsWith('!upsets')) {
+    await handleUpsetsCommand(message);
   }
 });
 

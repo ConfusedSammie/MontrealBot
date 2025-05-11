@@ -247,6 +247,7 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
       delta: string;
     }[] = [];
 
+    // Step 1: Gather current results
     for (const [discordId, tagList] of Object.entries(tags)) {
       const tagArray = Array.isArray(tagList) ? tagList : [tagList];
 
@@ -264,8 +265,9 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
           if (typeof previous === 'number') {
             const diff = profile.ordinal - previous;
             const symbol = diff > 0 ? '🔺' : diff < 0 ? '🔻' : '';
-            if (symbol)
+            if (symbol) {
               delta = `${symbol} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`;
+            }
           } else {
             delta = '🆕';
           }
@@ -283,20 +285,50 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
             characters,
             delta
           });
+
         } catch {
           // skip invalid or failed lookups
         }
-
       }
     }
 
     // Save the current snapshot
     saveLeaderboard(newSnapshot);
 
+    // Sort current leaderboard
     results.sort((a, b) => b.ordinal - a.ordinal);
 
+    // Step 2: Build previous position map
+    const previousRankOrder = Object.entries(lastLeaderboard)
+      .flatMap(([discordId, tagMap]) =>
+        Object.entries(tagMap).map(([tag, ordinal]) => ({
+          key: `${discordId}::${tag}`,
+          ordinal
+        }))
+      )
+      .sort((a, b) => b.ordinal - a.ordinal);
+
+    const previousPlacement: Record<string, number> = {};
+    previousRankOrder.forEach((entry, index) => {
+      previousPlacement[entry.key] = index;
+    });
+
+    // Step 3: Add position delta symbols
+    results.forEach((r, index) => {
+      const discordId = r.name.replace(/[<@>]/g, '');
+      const key = `${discordId}::${r.tag}`;
+      const oldIndex = previousPlacement[key];
+
+      if (oldIndex !== undefined) {
+        const movement = oldIndex - index;
+        const posSymbol = movement > 0 ? '🔼' : movement < 0 ? '🔽' : '';
+        r.delta += ` ${posSymbol}`;
+      }
+    });
+
+    // Format leaderboard lines
     const lines = results.map((r, i) =>
-      `**#${i + 1}** ${r.emoji} ${r.name} ${r.delta} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games}  ${r.characters}`
+      `**#${i + 1}** ${r.emoji} ${r.name} ${r.delta} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games} ${r.characters}`
     );
 
     const embed = new EmbedBuilder()
@@ -314,4 +346,150 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
     console.error(err);
     await message.reply('❌ Failed to generate leaderboard.');
   }
+}
+
+
+export async function handleUpsetsCommand(message: Message): Promise<void> {
+  const url = message.content.split(' ')[1];
+  if (!url) {
+    await message.reply('Usage: `!upsets start.gg/event_link`');
+    return;
+  }
+
+  const match = url.match(/start.gg\/(tournament\/.+\/event\/.+)/i);
+  if (!match) {
+    await message.reply('Invalid StartGG URL format.');
+    return;
+  }
+
+  const slug = match[1];
+  try {
+    const eventId = await getEventIdFromSlug(slug);
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.STARTGG_BEARER!}`,
+    };
+
+    // Fetch entrants
+    const entrantRes = await fetch('https://api.start.gg/gql/alpha', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        query: `
+          query Entrants($eventId: ID!) {
+            event(id: $eventId) {
+              entrants(query: { perPage: 500 }) {
+                nodes {
+                  id
+                  name
+                  seeds {
+                    seedNum
+                  }
+                }
+              }
+            }
+          }
+        `,
+        variables: { eventId },
+      }),
+    });
+
+    const entrantJson = await entrantRes.json();
+    if (!entrantJson.data?.event?.entrants?.nodes) {
+      await message.reply('❌ Failed to fetch entrants.');
+      return;
+    }
+
+    const eventName = entrantJson.data.event.name;
+    const entrants: Record<number, { name: string, seed: number }> = {};
+    for (const e of entrantJson.data.event.entrants.nodes) {
+      entrants[e.id] = {
+        name: e.name,
+        seed: e.seeds?.[0]?.seedNum ?? 9999,
+      };
+    }
+
+    // Fetch sets
+    const setsRes = await fetch('https://api.start.gg/gql/alpha', {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    query: `
+      query Sets($eventId: ID!) {
+        event(id: $eventId) {
+          sets(perPage: 500, page: 1) {
+            nodes {
+              id
+              winnerId
+              slots {
+                entrant { id name }
+              }
+            }
+          }
+        }
+      }
+    `,
+    variables: { eventId },
+  }),
+});
+
+    const setsJson = await setsRes.json();
+    if (!setsJson.data?.event?.sets?.nodes) {
+      await message.reply('❌ Failed to fetch sets.');
+      return;
+    }
+
+    const upsets: string[] = [];
+
+    for (const set of setsJson.data.event.sets.nodes) {
+      const [slot1, slot2] = set.slots;
+      if (!slot1 || !slot2 || !slot1.entrant || !slot2.entrant) continue;
+
+      const p1 = entrants[slot1.entrant.id];
+      const p2 = entrants[slot2.entrant.id];
+      const winner = entrants[set.winnerId];
+      const loser = set.winnerId === slot1.entrant.id ? p2 : p1;
+
+      if (!p1 || !p2 || !winner || !loser) continue;
+
+      if (winner.seed > loser.seed) {
+        const diff = winner.seed - loser.seed;
+        upsets.push(
+          `**${winner.name}** (Seed ${winner.seed}) upset **${loser.name}** (Seed ${loser.seed}) ${diff >= 20 ? '🔥' : ''}`
+        );
+      }
+    }
+
+    if (upsets.length === 0) {
+      await message.reply('✅ No upsets found in this event.');
+      return;
+    }
+
+    // Paginate into multiple embeds if needed
+    const chunks = chunkArray(upsets, 100); // 10 lines per embed
+    for (let i = 0; i < chunks.length; i++) {
+      const embed = new EmbedBuilder()
+        .setColor(0xe74c3c)
+        .setTitle(`🎯 Upsets`)
+        .setDescription(chunks[i].join('\n'))
+        .setFooter({ text: `Page ${i + 1} of ${chunks.length}` })
+        .setTimestamp();
+
+      if (message.channel.isTextBased() && 'send' in message.channel) {
+        await message.channel.send({ embeds: [embed] });
+      }
+    }
+
+  } catch (err) {
+    console.error(err);
+    await message.reply('❌ Failed to fetch or process upsets.');
+  }
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
 }
