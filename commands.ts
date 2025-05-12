@@ -247,7 +247,6 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
       delta: string;
     }[] = [];
 
-    // Step 1: Gather current results
     for (const [discordId, tagList] of Object.entries(tags)) {
       const tagArray = Array.isArray(tagList) ? tagList : [tagList];
 
@@ -260,17 +259,13 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
           const characters = profile.characters.map(getCharacterEmoji).join(' ');
 
           const previous = lastLeaderboard[discordId]?.[slippiTag];
-          let delta = '';
-
-          if (typeof previous === 'number') {
-            const diff = profile.ordinal - previous;
-            const symbol = diff > 0 ? '🔺' : diff < 0 ? '🔻' : '';
-            if (symbol) {
-              delta = `${symbol} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})`;
-            }
-          } else {
-            delta = '🆕';
-          }
+          let delta = typeof previous === 'number'
+            ? (() => {
+              const diff = profile.ordinal - previous;
+              const symbol = diff > 0 ? '🔺' : diff < 0 ? '🔻' : '';
+              return symbol ? `${symbol} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})` : '';
+            })()
+            : '🆕';
 
           if (!newSnapshot[discordId]) newSnapshot[discordId] = {};
           newSnapshot[discordId][slippiTag] = profile.ordinal;
@@ -285,40 +280,29 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
             characters,
             delta
           });
-
         } catch {
-          // skip invalid or failed lookups
+          // skip failed
         }
       }
     }
 
-    // Save the current snapshot
     saveLeaderboard(newSnapshot);
-
-    // Sort current leaderboard
     results.sort((a, b) => b.ordinal - a.ordinal);
 
-    // Step 2: Build previous position map
-    const previousRankOrder = Object.entries(lastLeaderboard)
-      .flatMap(([discordId, tagMap]) =>
-        Object.entries(tagMap).map(([tag, ordinal]) => ({
-          key: `${discordId}::${tag}`,
-          ordinal
-        }))
-      )
-      .sort((a, b) => b.ordinal - a.ordinal);
-
     const previousPlacement: Record<string, number> = {};
-    previousRankOrder.forEach((entry, index) => {
+    Object.entries(lastLeaderboard).flatMap(([discordId, tagMap]) =>
+      Object.entries(tagMap).map(([tag, ordinal]) => ({
+        key: `${discordId}::${tag}`,
+        ordinal
+      }))
+    ).sort((a, b) => b.ordinal - a.ordinal).forEach((entry, index) => {
       previousPlacement[entry.key] = index;
     });
 
-    // Step 3: Add position delta symbols
     results.forEach((r, index) => {
       const discordId = r.name.replace(/[<@>]/g, '');
       const key = `${discordId}::${r.tag}`;
       const oldIndex = previousPlacement[key];
-
       if (oldIndex !== undefined) {
         const movement = oldIndex - index;
         const posSymbol = movement > 0 ? '🔼' : movement < 0 ? '🔽' : '';
@@ -326,19 +310,44 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
       }
     });
 
-    // Format leaderboard lines
     const lines = results.map((r, i) =>
       `**#${i + 1}** ${r.emoji} ${r.name} ${r.delta} — ${escapeMarkdown(r.tag)} — ${r.ordinal.toFixed(1)} ${r.games} ${r.characters}`
     );
 
-    const embed = new EmbedBuilder()
-      .setColor(0x3498db)
-      .setTitle('🏆 Slippi Leaderboard')
-      .setDescription(lines.join('\n'))
-      .setTimestamp();
+    const MAX_CHARS = 4000;
+    let buffer = '';
+    let page = 1;
+    const embeds: EmbedBuilder[] = [];
 
-    if ('send' in message.channel) {
-      await message.channel.send({ embeds: [embed] });
+    for (const line of lines) {
+      if ((buffer + '\n' + line).length > MAX_CHARS) {
+        embeds.push(
+          new EmbedBuilder()
+            .setColor(0x3498db)
+            .setTitle(`🏆 Slippi Leaderboard${embeds.length > 0 ? ` — Page ${page++}` : ''}`)
+            .setDescription(buffer)
+            .setTimestamp()
+        );
+        buffer = line;
+      } else {
+        buffer += '\n' + line;
+      }
+    }
+
+    if (buffer.length > 0) {
+      embeds.push(
+        new EmbedBuilder()
+          .setColor(0x3498db)
+          .setTitle(`🏆 Slippi Leaderboard${embeds.length > 0 ? ` — Page ${page}` : ''}`)
+          .setDescription(buffer)
+          .setTimestamp()
+      );
+    }
+
+    if (message.channel.isTextBased() && 'send' in message.channel) {
+      for (const embed of embeds) {
+        await message.channel.send({ embeds: [embed] });
+      }
     } else {
       await message.reply('❌ This command must be used in a text or thread channel.');
     }
@@ -356,92 +365,153 @@ export async function handleUpsetsCommand(message: Message): Promise<void> {
     return;
   }
 
-  const match = url.match(/start.gg\/(tournament\/.+\/event\/.+)/i);
-  if (!match) {
-    await message.reply('Invalid StartGG URL format.');
-    return;
-  }
+  const bracketMatch = url.match(/brackets\/\d+\/(\d+)/);
+  const phaseGroupId = bracketMatch ? parseInt(bracketMatch[1]) : null;
 
-  const slug = match[1];
+  const eventMatch = url.match(/start.gg\/tournament\/([^/]+(?:\/[^/]+)*)\/event\/([^/]+)/i);
+  const slug = `tournament/${eventMatch[1]}/event/${eventMatch[2]}`;
+
+
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.STARTGG_BEARER!}`,
+  };
+
   try {
-    const eventId = await getEventIdFromSlug(slug);
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.STARTGG_BEARER!}`,
-    };
+    let eventId: number | null = null;
+    let eventName: string = 'Unknown Event';
+    const entrants: Record<number, { name: string; seed: number }> = {};
 
-    // Fetch entrants
-    const entrantRes = await fetch('https://api.start.gg/gql/alpha', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        query: `
-          query Entrants($eventId: ID!) {
-            event(id: $eventId) {
-              entrants(query: { perPage: 500 }) {
-                nodes {
-                  id
-                  name
-                  seeds {
-                    seedNum
+    // If using a normal event link, get event ID from slug
+    if (!phaseGroupId) {
+      if (!slug) {
+        await message.reply('❌ Missing valid event slug from the URL.');
+        return;
+      }
+
+      try {
+        eventId = await getEventIdFromSlug(slug);
+      } catch (err) {
+        console.error('❌ Failed to resolve slug to eventId:', slug, err);
+        await message.reply('❌ Could not resolve event from this URL.');
+        return;
+      }
+    }
+
+
+    // Always try to fetch entrants via eventId
+    if (eventId) {
+      const entrantRes = await fetch('https://api.start.gg/gql/alpha', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query: `
+            query Entrants($eventId: ID!) {
+              event(id: $eventId) {
+                name
+                entrants(query: { perPage: 500 }) {
+                  nodes {
+                    id
+                    name
+                    seeds {
+                      seedNum
+                    }
                   }
                 }
               }
             }
-          }
-        `,
-        variables: { eventId },
-      }),
-    });
+          `,
+          variables: { eventId },
+        }),
+      });
 
-    const entrantJson = await entrantRes.json();
-    if (!entrantJson.data?.event?.entrants?.nodes) {
-      await message.reply('❌ Failed to fetch entrants.');
-      return;
-    }
+      const entrantJson = await entrantRes.json();
+      if (!entrantJson.data?.event?.entrants?.nodes) {
+        await message.reply('❌ Failed to fetch entrants.');
+        return;
+      }
 
-    const eventName = entrantJson.data.event.name;
-    const entrants: Record<number, { name: string, seed: number }> = {};
-    for (const e of entrantJson.data.event.entrants.nodes) {
-      entrants[e.id] = {
-        name: e.name,
-        seed: e.seeds?.[0]?.seedNum ?? 9999,
-      };
+      eventName = entrantJson.data.event.name;
+      for (const e of entrantJson.data.event.entrants.nodes) {
+        entrants[e.id] = {
+          name: e.name,
+          seed: e.seeds?.[0]?.seedNum ?? 9999,
+        };
+      }
     }
 
     // Fetch sets
-    const setsRes = await fetch('https://api.start.gg/gql/alpha', {
-  method: 'POST',
-  headers,
-  body: JSON.stringify({
-    query: `
-      query Sets($eventId: ID!) {
-        event(id: $eventId) {
-          sets(perPage: 500, page: 1) {
-            nodes {
-              id
-              winnerId
-              slots {
-                entrant { id name }
+    let setsJson;
+    if (phaseGroupId) {
+      const setsRes = await fetch('https://api.start.gg/gql/alpha', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query: `
+            query Sets($phaseGroupId: ID!) {
+              phaseGroup(id: $phaseGroupId) {
+                sets(perPage: 500, page: 1) {
+                  nodes {
+                    id
+                    winnerId
+                    slots {
+                      entrant { id name }
+                    }
+                  }
+                }
               }
             }
-          }
-        }
-      }
-    `,
-    variables: { eventId },
-  }),
-});
+          `,
+          variables: { phaseGroupId },
+        }),
+      });
 
-    const setsJson = await setsRes.json();
-    if (!setsJson.data?.event?.sets?.nodes) {
-      await message.reply('❌ Failed to fetch sets.');
+      const rawSets = await setsRes.json();
+      if (!rawSets.data?.phaseGroup?.sets?.nodes) {
+        await message.reply('❌ Failed to fetch phase group sets.');
+        return;
+      }
+      setsJson = { nodes: rawSets.data.phaseGroup.sets.nodes };
+    } else if (eventId) {
+      const setsRes = await fetch('https://api.start.gg/gql/alpha', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          query: `
+            query Sets($eventId: ID!) {
+              event(id: $eventId) {
+                sets(perPage: 500, page: 1) {
+                  nodes {
+                    id
+                    winnerId
+                    slots {
+                      entrant { id name }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { eventId },
+        }),
+      });
+
+      const rawJson = await setsRes.json();
+      if (!rawJson.data?.event?.sets?.nodes) {
+        await message.reply('❌ Failed to fetch event sets.');
+        return;
+      }
+      setsJson = { nodes: rawJson.data.event.sets.nodes };
+    } else {
+      await message.reply('❌ Could not fetch event or phase group data.');
       return;
     }
 
+    // Analyze upsets
     const upsets: string[] = [];
 
-    for (const set of setsJson.data.event.sets.nodes) {
+    for (const set of setsJson.nodes) {
       const [slot1, slot2] = set.slots;
       if (!slot1 || !slot2 || !slot1.entrant || !slot2.entrant) continue;
 
@@ -461,16 +531,15 @@ export async function handleUpsetsCommand(message: Message): Promise<void> {
     }
 
     if (upsets.length === 0) {
-      await message.reply('✅ No upsets found in this event.');
+      await message.reply('✅ No upsets found in this bracket.');
       return;
     }
 
-    // Paginate into multiple embeds if needed
-    const chunks = chunkArray(upsets, 100); // 10 lines per embed
+    const chunks = chunkArray(upsets, 100);
     for (let i = 0; i < chunks.length; i++) {
       const embed = new EmbedBuilder()
         .setColor(0xe74c3c)
-        .setTitle(`🎯 Upsets`)
+        .setTitle(`🎯 Upsets — ${eventName}${phaseGroupId ? ' (Phase)' : ''}`)
         .setDescription(chunks[i].join('\n'))
         .setFooter({ text: `Page ${i + 1} of ${chunks.length}` })
         .setTimestamp();
@@ -481,10 +550,11 @@ export async function handleUpsetsCommand(message: Message): Promise<void> {
     }
 
   } catch (err) {
-    console.error(err);
+    console.error('Error in !upsets:', err);
     await message.reply('❌ Failed to fetch or process upsets.');
   }
 }
+
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -492,4 +562,123 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
     chunks.push(arr.slice(i, i + size));
   }
   return chunks;
+}
+
+
+
+export async function handleRemoveCommand(message: Message): Promise<void> {
+  const allTags = getAllTags();
+  const userId = message.author.id;
+  const yourTags = allTags[userId];
+
+  if (!yourTags || yourTags.length === 0) {
+    await message.reply('❌ You don’t have any tags saved.');
+    return;
+  }
+
+  if (yourTags.length === 1) {
+    const confirmMsg = await message.reply(`⚠️ You only have one tag saved: \`${yourTags[0]}\`.\nAre you sure you want to delete it? Reply with \`yes\` to confirm or \`no\` to cancel.`);
+
+    const filter = (m: Message) =>
+      m.author.id === userId &&
+      ['yes', 'no'].includes(m.content.trim().toLowerCase());
+
+    try {
+      if (!message.channel.isTextBased() || !('awaitMessages' in message.channel)) {
+        await message.reply('❌ Cannot prompt for input in this type of channel.');
+        return;
+      }
+
+      const collected = await message.channel.awaitMessages({
+        filter,
+        max: 1,
+        time: 15000,
+        errors: ['time'],
+      });
+
+
+      await confirmMsg.delete().catch(() => { });
+      const response = collected.first()!.content.trim().toLowerCase();
+
+      if (response === 'yes') {
+        delete allTags[userId];
+        fs.writeFileSync('./tags.json', JSON.stringify(allTags, null, 2));
+        await message.reply('✅ Your only tag was deleted.');
+      } else {
+        await message.reply('❌ Deletion cancelled.');
+      }
+    } catch {
+      await confirmMsg.delete().catch(() => { });
+      await message.reply('❌ You didn’t respond in time. Try `!remove` again.');
+    }
+
+    return;
+  }
+
+
+  const promptLines = yourTags.map((tag, i) => `**${i + 1}.** \`${tag}\``).join('\n');
+  const promptMessage = await message.reply(
+    `🗑️ You have multiple tags saved. Reply with the number of the tag you'd like to remove:\n${promptLines}`
+  );
+
+  const filter = (m: Message) =>
+    m.author.id === userId &&
+    !isNaN(parseInt(m.content.trim())) &&
+    parseInt(m.content.trim()) >= 1 &&
+    parseInt(m.content.trim()) <= yourTags.length;
+
+  try {
+    if (!message.channel.isTextBased() || !('awaitMessages' in message.channel)) {
+      await promptMessage.delete().catch(() => { });
+      await message.reply('❌ Cannot prompt for input in this type of channel.');
+      return;
+    }
+
+    const collected = await message.channel.awaitMessages({
+      filter,
+      max: 1,
+      time: 15000,
+      errors: ['time'],
+    });
+
+    await promptMessage.delete().catch(() => { });
+
+    const selectedIndex = parseInt(collected.first()!.content.trim(), 10) - 1;
+    const removedTag = yourTags[selectedIndex];
+
+    const newTagList = yourTags.filter((_, i) => i !== selectedIndex);
+    allTags[userId] = newTagList;
+
+    fs.writeFileSync('./tags.json', JSON.stringify(allTags, null, 2));
+
+    await message.reply(`✅ Removed tag \`${removedTag}\` from your saved list.`);
+  } catch {
+    await promptMessage.delete().catch(() => { });
+    await message.reply('❌ You didn’t respond in time. Try `!remove` again.');
+  }
+}
+
+
+export async function handleCommandsCommand(message: Message): Promise<void> {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📜 Commands')
+    .setDescription(
+      [
+        '**__Commands__**',
+        '1. Add your tag to the bot: `!tag MEOW#83` — you can have multiple tags.',
+        '2. Show the current leaderboard: `!leaderboard`.',
+        '3. Predict rating change vs an opponent: `!predict SAND#511`.',
+        '4. Simulate ranked game between two players: `!predict MEOW#83 SAND#511` (shows result for MEOW).',
+        '5. Get direct Slippi link: `!link MEOW#83`.',
+        '6. Remove one of your tags: `!remove`.'
+      ].join('\n')
+    )
+    .setTimestamp();
+
+  if (message.channel.isTextBased() && 'send' in message.channel) {
+    await message.channel.send({ embeds: [embed] });
+  } else {
+    await message.reply('❌ This command must be used in a text or thread channel.');
+  }
 }

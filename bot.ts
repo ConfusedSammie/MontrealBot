@@ -9,7 +9,9 @@ import {
   handleTagCommand,
   handleLeaderboardCommand,
   handleLinkCommand,
-  handleUpsetsCommand
+  handleUpsetsCommand,
+  handleRemoveCommand,
+  handleCommandsCommand
 } from './commands.js';
 
 const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID!;
@@ -52,8 +54,12 @@ client.on('messageCreate', async (message: Message) => {
   } else if (message.content.startsWith('!link')) {
     await handleLinkCommand(message);
   } else if (message.content.startsWith('!upsets')) {
-    await handleUpsetsCommand(message);
-  }
+    //await handleUpsetsCommand(message);
+  } else if (message.content.startsWith('!remove')) {
+    await handleRemoveCommand(message);
+  } else if (message.content.startsWith('!commands')) {
+  await handleCommandsCommand(message);
+}
 });
 
 client.login(process.env.DISCORD_TOKEN);
