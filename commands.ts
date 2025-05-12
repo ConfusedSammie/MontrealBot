@@ -8,6 +8,8 @@ import path from 'path';
 import fs from 'fs';
 import { getEmojiIdForName, getCharacterEmoji } from './emojis.js';
 
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID!;
+
 export async function handleLinkCommand(message: Message): Promise<void> {
   const parts = message.content.trim().split(/\s+/);
 
@@ -671,7 +673,8 @@ export async function handleCommandsCommand(message: Message): Promise<void> {
         '3. Predict rating change vs an opponent: `!predict SAND#511`.',
         '4. Simulate ranked game between two players: `!predict MEOW#83 SAND#511` (shows result for MEOW).',
         '5. Get direct Slippi link: `!link MEOW#83`.',
-        '6. Remove one of your tags: `!remove`.'
+        '6. Remove one of your tags: `!remove`.',
+        '7. View upcoming events `!events`.'
       ].join('\n')
     )
     .setTimestamp();
@@ -680,5 +683,119 @@ export async function handleCommandsCommand(message: Message): Promise<void> {
     await message.channel.send({ embeds: [embed] });
   } else {
     await message.reply('❌ This command must be used in a text or thread channel.');
+  }
+}
+
+
+export async function handleEventsCommand(message: Message): Promise<void> {
+  const raw = fs.readFileSync('./events.json', 'utf-8');
+  const events = JSON.parse(raw) as {
+    title: string;
+    date: string;
+    location: string;
+    url: string;
+    sortDate: string;
+  }[];
+
+  if (!events.length) {
+    await message.reply('📭 No upcoming events found.');
+    return;
+  }
+
+  // ✅ Sort by sortDate ascending
+  events.sort((a, b) => new Date(a.sortDate).getTime() - new Date(b.sortDate).getTime());
+
+  const lines = events.map((e, i) => `${i + 1}. [${e.title} | ${e.date} | ${e.location}](${e.url})`);
+
+  const embed = new EmbedBuilder()
+    .setTitle('📅 Upcoming Events')
+    .setColor(0x00bfff)
+    .setDescription(lines.join('\n'))
+    .setTimestamp();
+
+  await message.channel.send({ embeds: [embed] });
+}
+
+export async function handleAddEventCommand(message: Message): Promise<void> {
+  if (message.author.id !== ADMIN_USER_ID) {
+    await message.reply('❌ You are not authorized to add events.');
+    return;
+  }
+
+  const args = message.content.slice('!addevent'.length).trim();
+
+  // Match with optional 5th argument (sortDate)
+  const match = args.match(/\[(.+?)\]\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(https?:\/\/\S+)(?:\s*\|\s*(\d{4}-\d{2}-\d{2}))?/);
+
+  if (!match) {
+    await message.reply('⚠️ Invalid format.\nUse: `!addevent [Title] | Date | Location | URL | YYYY-MM-DD` (last part optional)');
+    return;
+  }
+
+  const [, title, date, location, url, sortDate] = match;
+
+  const raw = fs.readFileSync('./events.json', 'utf-8');
+  const events = JSON.parse(raw) as {
+    title: string;
+    date: string;
+    location: string;
+    url: string;
+    sortDate?: string;
+  }[];
+
+  events.push({ title, date, location, url, ...(sortDate ? { sortDate } : {}) });
+
+  fs.writeFileSync('./events.json', JSON.stringify(events, null, 2));
+
+  await message.reply(`✅ Added event: **${title}** | ${date} | ${location}${sortDate ? ` | 🗓️ ${sortDate}` : ''}`);
+}
+
+
+export async function handleDeleteEventCommand(message: Message): Promise<void> {
+  if (message.author.id !== ADMIN_USER_ID) {
+    await message.reply('❌ You are not authorized to delete events.');
+    return;
+  }
+
+  const raw = fs.readFileSync('./events.json', 'utf-8');
+  const events = JSON.parse(raw) as { title: string; date: string; location: string; url: string }[];
+
+  if (!events.length) {
+    await message.reply('📭 No events to delete.');
+    return;
+  }
+
+  const list = events.map((e, i) => `**${i + 1}.** [${e.title} | ${e.date} | ${e.location}](${e.url})`).join('\n');
+  const prompt = await message.reply(`🗑️ Reply with the number of the event you want to delete:\n${list}`);
+
+  const filter = (m: Message) =>
+    m.author.id === message.author.id &&
+    !isNaN(Number(m.content.trim())) &&
+    Number(m.content.trim()) >= 1 &&
+    Number(m.content.trim()) <= events.length;
+
+  try {
+    if (!message.channel.isTextBased() || !('awaitMessages' in message.channel)) {
+      await message.reply('❌ Cannot prompt for input in this type of channel.');
+      return;
+    }
+
+    const collected = await message.channel.awaitMessages({
+      filter,
+      max: 1,
+      time: 20000,
+      errors: ['time'],
+    });
+
+    await prompt.delete().catch(() => { });
+    const index = Number(collected.first()!.content.trim()) - 1;
+    const removed = events.splice(index, 1)[0];
+
+    fs.writeFileSync('./events.json', JSON.stringify(events, null, 2));
+
+    await message.reply(`✅ Removed event: **${removed.title} | ${removed.date} | ${removed.location}**`);
+  } catch {
+    await prompt.delete().catch(() => { });
+    await message.reply('❌ You didn’t respond in time. Try `!deleteevent` again.');
   }
 }

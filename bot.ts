@@ -11,7 +11,10 @@ import {
   handleLinkCommand,
   handleUpsetsCommand,
   handleRemoveCommand,
-  handleCommandsCommand
+  handleCommandsCommand,
+  handleEventsCommand,
+  handleAddEventCommand,
+  handleDeleteEventCommand
 } from './commands.js';
 
 const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID!;
@@ -58,8 +61,14 @@ client.on('messageCreate', async (message: Message) => {
   } else if (message.content.startsWith('!remove')) {
     await handleRemoveCommand(message);
   } else if (message.content.startsWith('!commands')) {
-  await handleCommandsCommand(message);
-}
+    await handleCommandsCommand(message);
+  } else if (message.content.startsWith('!events')) {
+    await handleEventsCommand(message);
+  } else if (message.content.startsWith('!addevent')) {
+    await handleAddEventCommand(message);
+  } else if (message.content.startsWith('!deleteevent')) {
+    await handleDeleteEventCommand(message);
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN);

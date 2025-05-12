@@ -1,0 +1,37 @@
+[
+  {
+    "title": "Timbos Dojo 7",
+    "date": "June 1",
+    "location": "Montreal",
+    "url": "https://start.gg/timbo-s-dojo-6",
+    "sortDate": "2025-06-01"
+  },
+  {
+    "title": "Timeout Camping",
+    "date": "June 6-8",
+    "location": "Montreal",
+    "url": "https://start.gg/smashcamp_mtl",
+    "sortDate": "2025-06-06"
+  },
+  {
+    "title": "Timbos En Masse",
+    "date": "August 16",
+    "location": "Montreal",
+    "url": "https://start.gg/timbosenmasse",
+    "sortDate": "2025-08-16"
+  },
+  {
+    "title": "The Mosh Pit",
+    "date": "September 20",
+    "location": "Ottawa",
+    "url": "https://www.start.gg/tournament/the-mosh-pit/details",
+    "sortDate": "2025-09-20"
+  },
+  {
+    "title": "Get On My Level: Forever",
+    "date": "July 4-6",
+    "location": "Toronto",
+    "url": "https://www.start.gg/tournament/get-on-my-level-forever-canadian-fighting-game-championships",
+    "sortDate": "2025-07-04"
+  }
+]
