@@ -1,11 +1,10 @@
-// slippiPredictor.ts
 import { rate, Rating, Options } from "openskill";
 
 const ORDINAL_SCALING = 25;
 const ORDINAL_OFFSET = 1100;
 const TAU = 0.3;
 
-const SLIPPI_API = "https://gql-gateway-dot-slippi.uc.r.appspot.com/graphql";
+const SLIPPI_API = "https://internal.slippi.gg/";
 
 const slippiOrdinal = (r: Rating): number =>
   ORDINAL_SCALING * (r.mu - 3 * r.sigma) + ORDINAL_OFFSET;
@@ -64,40 +63,80 @@ export function getRank(rating: number, regionalPlacement?: number, globalPlacem
 }
 
 export async function fetchSlippiProfile(code: string) {
+  const tag = code.toUpperCase();
+  console.log(`[Slippi] Fetching profile for: ${tag}`);
+
   const query = `
-    query {
-      getConnectCode(code: "${code.toUpperCase()}") {
-        user {
-          displayName
-          rankedNetplayProfile {
-            ratingMu
-            ratingSigma
-            ratingOrdinal
-            dailyRegionalPlacement
-            dailyGlobalPlacement
-            wins
-            losses
-            characters {
-              character
-            }
-          }
-        }
+    fragment profileFields on NetplayProfile {
+      id
+      ratingMu
+      ratingSigma
+      ratingOrdinal
+      ratingUpdateCount
+      wins
+      losses
+      dailyGlobalPlacement
+      dailyRegionalPlacement
+      continent
+      characters {
+        character
+        gameCount
       }
-    }`;
+    }
+
+    fragment userProfilePage on User {
+      fbUid
+      displayName
+      connectCode {
+        code
+      }
+      status
+      activeSubscription {
+        level
+        hasGiftSub
+      }
+      rankedNetplayProfile {
+        ...profileFields
+      }
+    }
+
+    query UserProfilePageQuery($cc: String, $uid: String) {
+      getUser(fbUid: $uid, connectCode: $cc) {
+        ...userProfilePage
+      }
+    }
+  `;
 
   const res = await fetch(SLIPPI_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      operationName: "UserProfilePageQuery",
+      query,
+      variables: { cc: tag, uid: tag },
+    }),
   });
 
-  const json = await res.json();
-  const user = json?.data?.getConnectCode?.user;
+  const text = await res.text();
+  let json;
+
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    console.error(`[Slippi] Failed to parse JSON for ${tag}`);
+    console.error(text.slice(0, 500));
+    throw new Error("Failed to parse Slippi response");
+  }
+
+  const user = json?.data?.getUser;
   if (!user || !user.rankedNetplayProfile) {
-    throw new Error(`Ranked profile not found for ${code}`);
+    console.warn(`[Slippi] No ranked profile for ${tag}. Full response:`, JSON.stringify(json, null, 2));
+    throw new Error(`Ranked profile not found for ${tag}`);
   }
 
   const profile = user.rankedNetplayProfile;
+
+  console.log(`[Slippi] Profile for ${user.displayName}: ${profile.ratingOrdinal.toFixed(1)} ordinal`);
 
   return {
     mu: profile.ratingMu,
@@ -108,7 +147,7 @@ export async function fetchSlippiProfile(code: string) {
     globalPlacement: profile.dailyGlobalPlacement,
     wins: profile.wins,
     losses: profile.losses,
-    characters: profile.characters.map(c => c.character)
+    characters: profile.characters.map(c => c.character),
   };
 }
 
@@ -157,6 +196,4 @@ export async function predictChange(opponentCode: string, playerCode: string = "
     winRankEmojiName: winRank.replace(' ', ''),
     lossRankEmojiName: lossRank.replace(' ', '')
   };
-
-
 }
