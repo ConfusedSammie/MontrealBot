@@ -14,8 +14,17 @@ import {
   handleCommandsCommand,
   handleEventsCommand,
   handleAddEventCommand,
-  handleDeleteEventCommand
+  handleDeleteEventCommand,
+  handleBalanceCommand
 } from './commands.js';
+
+import {
+  handlePredictionsCommand,
+  handleBetCommand,
+  handleResolvePredictionCommand,
+  handleCreatePredictionCommand,
+  handleMyBetsCommand
+} from './predictionSystem.js';
 
 const ALLOWED_CHANNEL_ID = process.env.ALLOWED_CHANNEL_ID!;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID!;
@@ -40,35 +49,68 @@ client.on('messageCreate', async (message: Message) => {
   const isAdmin = message.author.id === ADMIN_USER_ID;
   const isInAllowedChannel = message.channel.id === ALLOWED_CHANNEL_ID;
 
-  if (!isInAllowedChannel && !isAdmin) {
-    return; // Ignore messages from unauthorized channels or users
-  }
+  if (!isInAllowedChannel && !isAdmin) return;
 
-  if (message.content.startsWith('!results')) {
-    await handleResultsCommand(message);
-  } else if (message.content.startsWith('!stopresults')) {
-    //handleStopResultsCommand(message);
-  } else if (message.content.startsWith('!predict')) {
-    await handlePredictCommand(message);
-  } else if (message.content.startsWith('!tag')) {
-    handleTagCommand(message);
-  } else if (message.content.startsWith('!leaderboard')) {
-    await handleLeaderboardCommand(message);
-  } else if (message.content.startsWith('!link')) {
-    await handleLinkCommand(message);
-  } else if (message.content.startsWith('!upsets')) {
-    //await handleUpsetsCommand(message);
-  } else if (message.content.startsWith('!remove')) {
-    await handleRemoveCommand(message);
-  } else if (message.content.startsWith('!commands')) {
-    await handleCommandsCommand(message);
-  } else if (message.content.startsWith('!events')) {
-    await handleEventsCommand(message);
-  } else if (message.content.startsWith('!addevent')) {
-    await handleAddEventCommand(message);
-  } else if (message.content.startsWith('!deleteevent')) {
-    await handleDeleteEventCommand(message);
+  const command = message.content.trim().split(/\s+/)[0].toLowerCase();
+
+  switch (command) {
+    case '!results':
+      await handleResultsCommand(message);
+      break;
+    case '!stopresults':
+      // await handleStopResultsCommand(message);
+      break;
+    case '!predict':
+      await handlePredictCommand(message);
+      break;
+    case '!tag':
+      handleTagCommand(message);
+      break;
+    case '!leaderboard':
+      await handleLeaderboardCommand(message);
+      break;
+    case '!link':
+      await handleLinkCommand(message);
+      break;
+    case '!upsets':
+      await handleUpsetsCommand(message);
+      break;
+    case '!remove':
+      await handleRemoveCommand(message);
+      break;
+    case '!commands':
+      await handleCommandsCommand(message);
+      break;
+    case '!events':
+      await handleEventsCommand(message);
+      break;
+    case '!addevent':
+      await handleAddEventCommand(message);
+      break;
+    case '!deleteevent':
+      await handleDeleteEventCommand(message);
+      break;
+    case '!balance':
+      await handleBalanceCommand(message);
+      break;
+    case '!predictions':
+      //await handlePredictionsCommand(message);
+      break;
+    case '!bet':
+      //await handleBetCommand(message);
+      break;
+    case '!resolve':
+      //await handleResolvePredictionCommand(message);
+      break;
+    case '!createprediction':
+      //await handleCreatePredictionCommand(message);
+      break;
+    case '!bets':
+      //await handleMyBetsCommand(message);
+      break;
+
   }
 });
+
 
 client.login(process.env.DISCORD_TOKEN);

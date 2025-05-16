@@ -49,7 +49,7 @@ export function getRank(rating: number, regionalPlacement?: number, globalPlacem
       return 'DIAMOND 2';
     case rating < 2192:
       return 'DIAMOND 3';
-    case rating >= 2192 && (Boolean(regionalPlacement && regionalPlacement <= 100) || Boolean(globalPlacement && globalPlacement <= 300)):
+    case rating >= 2192 && (globalPlacement && globalPlacement <= 300):
       return 'GRANDMASTER';
     case rating < 2275:
       return 'MASTER 1';

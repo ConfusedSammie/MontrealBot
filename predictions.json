@@ -1,0 +1,21 @@
+{
+  "who_will_win_": {
+    "question": "Who will win?",
+    "options": [
+      "Lunar Dusk",
+      "Zamu",
+      "Inky",
+      "Other"
+    ],
+    "bets": {
+      "135215986407243776": {
+        "optionIndex": 0,
+        "amount": 1000
+      }
+    },
+    "status": "open",
+    "maxBet": 1000,
+    "date": "2025-06-15",
+    "url": "https://start.gg/timbosenmasse"
+  }
+}

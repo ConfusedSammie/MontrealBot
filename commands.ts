@@ -1,9 +1,14 @@
-import { AttachmentBuilder, Message, EmbedBuilder } from 'discord.js';
+import { AttachmentBuilder, Message, EmbedBuilder, TextBasedChannel } from 'discord.js';
 import { getEventIdFromSlug, escapeMarkdown } from './utils.js';
 import { fetchGraphQL1 } from './fetchResults.js';
 import { activeEventIntervals } from './state.js';
 import { predictChange, fetchSlippiProfile, getRank } from './slippiPredictor.js';
-import { getAllTags, getTag, setTag } from './tagStore.js';
+import {
+  getAllTags as fetchAllTags,
+  getTag,
+  setTag,
+  removeTag
+} from './tagStore';
 import path from 'path';
 import fs from 'fs';
 import { getEmojiIdForName, getCharacterEmoji } from './emojis.js';
@@ -89,8 +94,18 @@ export function handleTagCommand(message: Message): void {
     return;
   }
 
-  setTag(message.author.id, tag);
-  message.reply(`✅ Slippi tag \`${tag}\` saved for <@${message.author.id}>`);
+  const allTags = getAllTags();
+  const userId = message.author.id;
+  if (!allTags[userId]) {
+    allTags[userId] = { tags: [], timbucks: 1000 };
+  }
+  const normalizedTag = tag.toUpperCase();
+  if (!allTags[userId].tags.includes(normalizedTag)) {
+    allTags[userId].tags.push(normalizedTag);
+  }
+
+  saveAllTags(allTags);
+  message.reply(`✅ Slippi tag \`${tag}\` saved for <@${userId}>`);
 }
 
 export async function handlePredictCommand(message: Message): Promise<void> {
@@ -233,8 +248,10 @@ function saveLeaderboard(snapshot: LeaderboardSnapshot): void {
 }
 
 export async function handleLeaderboardCommand(message: Message): Promise<void> {
+  console.log('hello');
   try {
     const tags = getAllTags();
+
     const lastLeaderboard = loadLastLeaderboard();
     const newSnapshot: LeaderboardSnapshot = {};
 
@@ -250,12 +267,13 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
     }[] = [];
 
     for (const [discordId, tagList] of Object.entries(tags)) {
-      const tagArray = Array.isArray(tagList) ? tagList : [tagList];
-
+      const tagArray = tagList.tags || [];
       for (const slippiTag of tagArray) {
         try {
+          console.log(slippiTag);
           const profile = await fetchSlippiProfile(slippiTag);
-          const rank = getRank(profile.ordinal).toUpperCase().replace(' ', '');
+          console.log(profile);
+          const rank = getRank(profile.ordinal, profile.regionalPlacement, profile.globalPlacement).toUpperCase().replace(' ', '');
           const emoji = rankToEmoji(rank);
           const games = `(W:${profile.wins} / L:${profile.losses})`;
           const characters = profile.characters.map(getCharacterEmoji).join(' ');
@@ -282,8 +300,9 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
             characters,
             delta
           });
-        } catch {
-          // skip failed
+          console.log(results);
+        } catch (err) {
+          console.warn(`❌ Failed to fetch profile for tag ${slippiTag}`, err);
         }
       }
     }
@@ -371,7 +390,13 @@ export async function handleUpsetsCommand(message: Message): Promise<void> {
   const phaseGroupId = bracketMatch ? parseInt(bracketMatch[1]) : null;
 
   const eventMatch = url.match(/start.gg\/tournament\/([^/]+(?:\/[^/]+)*)\/event\/([^/]+)/i);
+  if (!eventMatch) {
+    await message.reply('Invalid StartGG URL format.');
+    return;
+  }
+
   const slug = `tournament/${eventMatch[1]}/event/${eventMatch[2]}`;
+
 
 
 
@@ -571,9 +596,10 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 export async function handleRemoveCommand(message: Message): Promise<void> {
   const allTags = getAllTags();
   const userId = message.author.id;
-  const yourTags = allTags[userId];
+  const userData = allTags[userId];
+  const yourTags = userData?.tags || [];
 
-  if (!yourTags || yourTags.length === 0) {
+  if (yourTags.length === 0) {
     await message.reply('❌ You don’t have any tags saved.');
     return;
   }
@@ -598,13 +624,12 @@ export async function handleRemoveCommand(message: Message): Promise<void> {
         errors: ['time'],
       });
 
-
       await confirmMsg.delete().catch(() => { });
       const response = collected.first()!.content.trim().toLowerCase();
 
       if (response === 'yes') {
         delete allTags[userId];
-        fs.writeFileSync('./tags.json', JSON.stringify(allTags, null, 2));
+        saveAllTags(allTags);
         await message.reply('✅ Your only tag was deleted.');
       } else {
         await message.reply('❌ Deletion cancelled.');
@@ -616,6 +641,7 @@ export async function handleRemoveCommand(message: Message): Promise<void> {
 
     return;
   }
+
 
 
   const promptLines = yourTags.map((tag, i) => `**${i + 1}.** \`${tag}\``).join('\n');
@@ -648,10 +674,14 @@ export async function handleRemoveCommand(message: Message): Promise<void> {
     const selectedIndex = parseInt(collected.first()!.content.trim(), 10) - 1;
     const removedTag = yourTags[selectedIndex];
 
-    const newTagList = yourTags.filter((_, i) => i !== selectedIndex);
-    allTags[userId] = newTagList;
+    userData.tags = yourTags.filter((_, i) => i !== selectedIndex);
+    if (userData.tags.length) {
+      allTags[userId] = userData;
+    } else {
+      delete allTags[userId]; // ✅ Removes the user key entirely
+    }
+    saveAllTags(allTags);
 
-    fs.writeFileSync('./tags.json', JSON.stringify(allTags, null, 2));
 
     await message.reply(`✅ Removed tag \`${removedTag}\` from your saved list.`);
   } catch {
@@ -659,7 +689,6 @@ export async function handleRemoveCommand(message: Message): Promise<void> {
     await message.reply('❌ You didn’t respond in time. Try `!remove` again.');
   }
 }
-
 
 export async function handleCommandsCommand(message: Message): Promise<void> {
   const embed = new EmbedBuilder()
@@ -713,7 +742,12 @@ export async function handleEventsCommand(message: Message): Promise<void> {
     .setDescription(lines.join('\n'))
     .setTimestamp();
 
-  await message.channel.send({ embeds: [embed] });
+  if (message.channel.isTextBased() && 'send' in message.channel) {
+    await message.channel.send({ embeds: [embed] });
+  } else {
+    await message.reply('❌ This command must be used in a text or thread channel.');
+  }
+
 }
 
 export async function handleAddEventCommand(message: Message): Promise<void> {
@@ -797,5 +831,44 @@ export async function handleDeleteEventCommand(message: Message): Promise<void> 
   } catch {
     await prompt.delete().catch(() => { });
     await message.reply('❌ You didn’t respond in time. Try `!deleteevent` again.');
+  }
+}
+
+
+function saveAllTags(tags: Record<string, { tags: string[]; timbucks: number }>) {
+  fs.writeFileSync('./tags.json', JSON.stringify(tags, null, 2), 'utf8');
+}
+
+function getAllTags(): Record<string, { tags: string[]; timbucks: number }> {
+  try {
+    const raw = fs.readFileSync('./tags.json', 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+export async function handleBalanceCommand(message: Message): Promise<void> {
+  const allTags = getAllTags();
+  const userId = message.author.id;
+  const userData = allTags[userId];
+
+  if (!userData || !userData.tags || userData.tags.length === 0) {
+    await message.reply('⚠️ You don’t have any Slippi tags saved yet. Use `!tag YOURTAG#000` to register.');
+    return;
+  }
+
+  const balance = userData.timbucks ?? 0;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle('<:timbo:1274916782632730728> Your Timbucks Balance')
+    .setDescription(`You currently have **${balance.toLocaleString()}** Timbucks <:timbo:1274916782632730728>.`)
+    .setTimestamp();
+
+  if (message.channel.isTextBased() && 'send' in message.channel) {
+    await message.channel.send({ embeds: [embed] });
+  } else {
+    await message.reply(`💰 You have **${balance.toLocaleString()}** Timbucks.`);
   }
 }
