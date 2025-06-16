@@ -275,7 +275,7 @@ export async function handleLeaderboardCommand(message: Message): Promise<void> 
           console.log(profile);
           const rank = getRank(profile.ordinal, profile.regionalPlacement, profile.globalPlacement).toUpperCase().replace(' ', '');
           const emoji = rankToEmoji(rank);
-          const games = `(W:${profile.wins} / L:${profile.losses})`;
+          const games = `(${profile.wins}/${profile.losses})`;
           const characters = profile.characters.map(getCharacterEmoji).join(' ');
 
           const previous = lastLeaderboard[discordId]?.[slippiTag];
@@ -549,7 +549,7 @@ export async function handleUpsetsCommand(message: Message): Promise<void> {
 
       if (!p1 || !p2 || !winner || !loser) continue;
 
-      if (winner.seed > loser.seed) {
+      if (winner.seed > (loser.seed + 1)) {
         const diff = winner.seed - loser.seed;
         upsets.push(
           `**${winner.name}** (Seed ${winner.seed}) upset **${loser.name}** (Seed ${loser.seed}) ${diff >= 20 ? '🔥' : ''}`
@@ -736,11 +736,13 @@ export async function handleEventsCommand(message: Message): Promise<void> {
 
   const lines = events.map((e, i) => `${i + 1}. [${e.title} | ${e.date} | ${e.location}](${e.url})`);
 
-  const embed = new EmbedBuilder()
-    .setTitle('📅 Upcoming Events')
-    .setColor(0x00bfff)
-    .setDescription(lines.join('\n'))
-    .setTimestamp();
+const embed = new EmbedBuilder()
+  .setTitle('📅 Upcoming Events')
+  .setColor(0x00bfff)
+  .setDescription(lines.join('\n'))
+  .setFooter({ text: 'Events with (AQ) mean that you can qualify for the Arcadian' })
+  .setTimestamp();
+
 
   if (message.channel.isTextBased() && 'send' in message.channel) {
     await message.channel.send({ embeds: [embed] });
@@ -870,5 +872,157 @@ export async function handleBalanceCommand(message: Message): Promise<void> {
     await message.channel.send({ embeds: [embed] });
   } else {
     await message.reply(`💰 You have **${balance.toLocaleString()}** Timbucks.`);
+  }
+}
+
+const WEEKLY_HISTORY_FILE = './weekly.json';
+
+function loadWeeklyLeaderboard(): LeaderboardSnapshot {
+  try {
+    return JSON.parse(fs.readFileSync(WEEKLY_HISTORY_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveWeeklyLeaderboard(snapshot: LeaderboardSnapshot): void {
+  fs.writeFileSync(WEEKLY_HISTORY_FILE, JSON.stringify(snapshot, null, 2), 'utf8');
+}
+
+
+export async function handleWeeklyCommand(message: Message): Promise<void> {
+  try {
+    const tags = getAllTags();
+    const lastLeaderboard = loadWeeklyLeaderboard();
+    const newSnapshot: LeaderboardSnapshot = {};
+
+    const results: {
+      name: string;
+      tag: string;
+      ordinal: number;
+      rank: string;
+      emoji: string;
+      games: string;
+      characters: string;
+      delta: string;
+      posSymbol: string;
+    }[] = [];
+
+    for (const [discordId, tagList] of Object.entries(tags)) {
+      const tagArray = tagList.tags || [];
+      for (const slippiTag of tagArray) {
+        try {
+          const profile = await fetchSlippiProfile(slippiTag);
+          const rank = getRank(profile.ordinal, profile.regionalPlacement, profile.globalPlacement).toUpperCase().replace(' ', '');
+          const emoji = rankToEmoji(rank);
+          const games = `(${profile.wins}/${profile.losses})`;
+          const characters = profile.characters.map(getCharacterEmoji).join(' ');
+
+          const previous = lastLeaderboard[discordId]?.[slippiTag];
+          let posSymbol = '🔄';
+          let delta = typeof previous === 'number'
+            ? (() => {
+              const diff = profile.ordinal - previous;
+              const symbol = diff > 0 ? '🔺' : diff < 0 ? '🔻' : '';
+              return symbol ? `${symbol} (${diff >= 0 ? '+' : ''}${diff.toFixed(1)})` : '';
+            })()
+            : (posSymbol = '🆕');
+
+          if (!newSnapshot[discordId]) newSnapshot[discordId] = {};
+          newSnapshot[discordId][slippiTag] = profile.ordinal;
+
+          results.push({
+            name: `<@${discordId}>`,
+            tag: slippiTag,
+            ordinal: profile.ordinal,
+            rank,
+            emoji,
+            games,
+            characters,
+            delta,
+            posSymbol
+          });
+        } catch (err) {
+          console.warn(`❌ Failed to fetch profile for tag ${slippiTag}`, err);
+        }
+      }
+    }
+
+    saveWeeklyLeaderboard(newSnapshot);
+    results.sort((a, b) => b.ordinal - a.ordinal);
+
+    const previousPlacement: Record<string, number> = {};
+    Object.entries(lastLeaderboard).flatMap(([discordId, tagMap]) =>
+      Object.entries(tagMap).map(([tag, ordinal]) => ({ key: `${discordId}::${tag}`, ordinal }))
+    ).sort((a, b) => b.ordinal - a.ordinal).forEach((entry, index) => {
+      previousPlacement[entry.key] = index;
+    });
+
+    results.forEach((r, index) => {
+      const discordId = r.name.replace(/[<@>]/g, '');
+      const key = `${discordId}::${r.tag}`;
+      const oldIndex = previousPlacement[key];
+
+      if (oldIndex !== undefined) {
+        const movement = oldIndex - index;
+        r.posSymbol = movement > 0 ? '↗' : movement < 0 ? '⤵' : '↔';
+
+      }
+    });
+
+    /* const lines = results.map((r, i) =>
+       `${r.posSymbol} **#${i + 1}** ${r.emoji} ${r.name} ${r.delta} ${escapeMarkdown(r.tag)} | ${r.ordinal.toFixed(1)} ${r.games} ${r.characters}`
+     );*/
+
+    const lines = results.map((r, i) => {
+      const discordId = r.name.replace(/[<@>]/g, '');
+      const key = `${discordId}::${r.tag}`;
+      const oldIndex = previousPlacement[key];
+      const wasText = typeof oldIndex === 'number' ? `${oldIndex + 1}` : '';
+
+      return `${r.emoji} ${r.posSymbol} ${wasText}➡${i + 1}  ${r.name} ${r.delta} ${escapeMarkdown(r.tag)} | ${r.ordinal.toFixed(1)} ${r.games} ${r.characters}`;
+    });
+
+
+    const MAX_CHARS = 4000;
+    let buffer = '';
+    let page = 1;
+    const embeds: EmbedBuilder[] = [];
+
+    for (const line of lines) {
+      if ((buffer + '\n' + line).length > MAX_CHARS) {
+        embeds.push(
+          new EmbedBuilder()
+            .setColor(0x3498db)
+            .setTitle(`📊 Weekly Leaderboard${embeds.length > 0 ? ` — Page ${page++}` : ''}`)
+            .setDescription(buffer)
+            .setTimestamp()
+        );
+        buffer = line;
+      } else {
+        buffer += '\n' + line;
+      }
+    }
+
+    if (buffer.length > 0) {
+      embeds.push(
+        new EmbedBuilder()
+          .setColor(0x3498db)
+          .setTitle(`📊 Weekly Leaderboard${embeds.length > 0 ? ` — Page ${page}` : ''}`)
+          .setDescription(buffer)
+          .setTimestamp()
+      );
+    }
+
+    if (message.channel.isTextBased() && 'send' in message.channel) {
+      for (const embed of embeds) {
+        await message.channel.send({ embeds: [embed] });
+      }
+    } else {
+      await message.reply('❌ This command must be used in a text or thread channel.');
+    }
+  } catch (err) {
+    console.error(err);
+    await message.reply('❌ Failed to generate weekly leaderboard.');
   }
 }

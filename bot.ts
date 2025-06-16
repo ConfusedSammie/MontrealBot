@@ -15,7 +15,8 @@ import {
   handleEventsCommand,
   handleAddEventCommand,
   handleDeleteEventCommand,
-  handleBalanceCommand
+  handleBalanceCommand,
+  handleWeeklyCommand
 } from './commands.js';
 
 import {
@@ -41,17 +42,23 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user?.tag}`);
 });
 
+const commandChannelPermissions: Record<string, string[]> = {
+  '!events': ['1015762373396660304', '1015405446808473683', '1369381559249010799'],
+  '!leaderboard': ['1369381559249010799', '1052036450360758344'], // override default for specific command
+  // add more as needed
+};
 
 
 client.on('messageCreate', async (message: Message) => {
   if (message.author.bot) return;
 
   const isAdmin = message.author.id === ADMIN_USER_ID;
-  const isInAllowedChannel = message.channel.id === ALLOWED_CHANNEL_ID;
+  const command = message.content.trim().split(/\s+/)[0].toLowerCase();
+
+  const allowedChannels = commandChannelPermissions[command] || [ALLOWED_CHANNEL_ID];
+  const isInAllowedChannel = allowedChannels.includes(message.channel.id);
 
   if (!isInAllowedChannel && !isAdmin) return;
-
-  const command = message.content.trim().split(/\s+/)[0].toLowerCase();
 
   switch (command) {
     case '!results':
@@ -61,13 +68,19 @@ client.on('messageCreate', async (message: Message) => {
       // await handleStopResultsCommand(message);
       break;
     case '!predict':
+    case '!p':
       await handlePredictCommand(message);
       break;
     case '!tag':
       handleTagCommand(message);
       break;
     case '!leaderboard':
+    case '!l':
       await handleLeaderboardCommand(message);
+      break;
+    case '!weekly':
+    case '!w':
+      //await handleWeeklyCommand(message);
       break;
     case '!link':
       await handleLinkCommand(message);
@@ -82,6 +95,7 @@ client.on('messageCreate', async (message: Message) => {
       await handleCommandsCommand(message);
       break;
     case '!events':
+      case '!event':
       await handleEventsCommand(message);
       break;
     case '!addevent':

@@ -1,22 +1,8 @@
 [
   {
-    "title": "Timbos Dojo 7",
-    "date": "June 1",
-    "location": "Montreal",
-    "url": "https://start.gg/timbo-s-dojo-6",
-    "sortDate": "2025-06-01"
-  },
-  {
-    "title": "Timeout Camping",
-    "date": "June 6-8",
-    "location": "Montreal",
-    "url": "https://start.gg/smashcamp_mtl",
-    "sortDate": "2025-06-06"
-  },
-  {
-    "title": "Timbos En Masse",
+    "title": "Timbos En Masse (AQ)",
     "date": "August 16",
-    "location": "Montreal",
+    "location": "West-Island",
     "url": "https://start.gg/timbosenmasse",
     "sortDate": "2025-08-16"
   },
@@ -35,10 +21,24 @@
     "sortDate": "2025-07-04"
   },
   {
-    "title": "NPC & SSBMTL present Melee Happy Hour #46",
-    "date": "May 18th, 2025",
-    "location": "Montreal",
-    "url": "https://www.start.gg/tournament/npc-ssbmtl-present-melee-happy-hour-46/details",
-    "sortDate": "2025-05-18"
+    "title": "Lemaylee: Better with Down Air (AQ)",
+    "date": "July 19",
+    "location": "Assomption",
+    "url": "https://www.start.gg/tournament/lemaylee-better-with-down-air/details",
+    "sortDate": "2025-07-19"
+  },
+  {
+    "title": "BunkerSmash de Verdun",
+    "date": "June 20",
+    "location": "Jolicoeur Metro",
+    "url": "https://www.start.gg/tournament/bunkersmash-de-verdun/details",
+    "sortDate": "2025-06-20"
+  },
+  {
+    "title": "Melee Happy Hour #48 (AQ)",
+    "date": "June 22",
+    "location": "Berri-UQAM",
+    "url": "https://www.start.gg/happy-hour",
+    "sortDate": "2025-06-22"
   }
 ]
